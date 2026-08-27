@@ -2,10 +2,15 @@ import json
 import os
 from typing import Any
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 from pydantic import ValidationError
 
 from schemas.generation_plan import GenerationPlan
+
+
+class PlanFormatError(RuntimeError):
+    """DeepSeek 返回了格式不对的内容（非法 JSON 或不符合 Schema）。可重试修正。"""
+
 
 SYSTEM_PROMPT = """
 你是一个 Generative AI 图像提示词规划器。
@@ -19,39 +24,37 @@ GenerationPlan JSON。
 不要输出解释。
 只能输出 JSON。
 
-规则：
+# 元素拆解（elements）
 
-1. 必须严格遵循提供的 JSON Schema。
-2. 不要增加 Schema 中不存在的字段。
-3. 不要删除必要字段。
-4. 把画面拆解为多个基本元素（elements），每个元素是画面中一个可指认的事物。
-5. 每个元素必须包含 name。
-6. 用户没有明确给出的可选字段（count/appearance/position/size/action/relation），
-   不要留 null，应根据画面场景与元素类型，用最合理、最常见的默认值自动补齐。
-   例如：单一主体默认放在画面中央、占据主体；人物默认补全常见的中性外观与姿态
-   （如"少女，长发，浅色上衣，自然表情"）。
-   自动补齐必须与用户需求一致，不得冲突。
-7. 动作引发的瞬态效果（如：跳跃溅起的水花、扬起的尘土）写入该元素的 action。
-8. 元素外观（appearance）应按元素类型覆盖完整：
-   人物→年龄感、体型、发型、发色、五官、肤色、服饰、表情；
-   物体→形状、颜色、材质、纹理、破损或新旧，及物体上印刻的文字（保持原文）；
-   自然元素→形态、颜色、光照感。
-   用户未提到的方面用该类元素最常见的中性默认补全。
-9. 描述元素关系时，引用其他元素的 name（如"站在草坪上"），
-   也可引用'镜头/天空/远方/画面外'等全局参照（如"凝视镜头"）。
-10. 画面级属性（overall）用一段简洁连贯的中文描述，只写画面级（全局）属性，按需覆盖：
-    风格（写实摄影/Cinematic/2D动画/3D CG/水彩/水墨/赛博朋克/复古胶片等）、
-    构图与镜头（景别、机位角度、透视、景深）、光线（时间、光源、方向）、
-    天气与环境、色调与氛围、画幅比、视觉特效（光斑、倒影、颗粒感、长曝光）、
-    画质与细节、不应出现的内容。
-    注意：
-    - overall 只放画面级属性；元素的细节（外观/动作/位置/服饰/表情/五官等）只写进对应 element，
-      不要在 overall 中复述或整段照抄用户原文；
-    - 写成简洁的一到两句话，不要用"构图：""光线：""色调："之类的标签罗列；
-    - 用户未提到的方面按画面最合理的方式默认补齐，只有完全无法推断时才用 null。
-11. 元素上出现的文字（如招牌、书名、标语）属于该元素的描述，必须保持用户原文逐字保留，不得改写或翻译。
-12. 用户明确提供的信息必须尽可能完整地保留。
-13. 自动补齐的默认信息不得与用户需求冲突；不要凭空编造与画面无关的新元素或实体。
+1. 只把画面中需要单独控制的主要主体拆为元素（elements）：
+   主要人物、核心物体、前景关键对象、需要独立描述的自然主体（太阳、山、建筑等）。
+   不要为每个名词都拆一个元素；背景、天气、氛围、环境特效写进 overall。
+   元素个数由画面内容决定，不设上限。
+2. 独立 vs 并入：对画面中每个对象先判断「它是主体，还是附属？」
+   - 主体或并列主体（哪怕画面里只有一把伞、一个杯子这样的孤立对象）→ 独立成元素。
+   - 依附于另一主体的随身/互动道具（拿在手里、背在身上、作为配饰的伞、剑、书、
+     包、乐器、杯子、帽子）→ 并入持有主体的 action 描述（含道具外观），不单独成元素。
+3. 同一主体在画面中多次出现（如多宫格同一只猫、同一人物出现在画面多处）：
+   只拆为一个元素。固定外观写一次；layout 与 action 是它的出现列表，逐项对齐
+   （第 i 项位置对应第 i 项行为）；每次出现特有的事物写进对应的 action 项。
+
+# 字段
+
+4. 每个元素统一用同一套字段：name、count、appearance、layout、action。
+   各字段的语义、示例与填写边界以文末 JSON Schema 的字段描述为准，不要自创字段。
+
+# 补全与约束
+
+5. 可选字段（count/appearance/layout/action）不要留 null：按画面场景与元素类型，
+   用最合理、最常见的默认值自动补齐，且不得与用户需求冲突。
+   例如：单一出现的元素默认 layout=["画面中央，占据主体"]、action=["静止，正视前方"]。
+6. overall 只写画面级（全局）属性（风格/构图/光线/天气/氛围/画幅/特效/画质/
+   整体排版布局框架），只在需要时写一次；多宫格/分镜的整体框架
+   （等大画框、留白边框、几行几列）只写进 overall；
+   元素的细节（外观/行为/位置/服饰/表情等）只写进对应 element，overall 不重复。
+7. 元素上出现的文字（招牌、书名、标语）保持用户原文逐字保留。
+8. 用户明确提供的信息必须尽可能完整保留；自动补齐不得与用户需求冲突；
+   不要编造画面外的新主体。
 
 最终只能输出符合 JSON Schema 的 JSON object。
 """
@@ -107,36 +110,95 @@ def call_deepseek(
             "type": "json_object"
         },
         temperature=0.1,
-        max_tokens=4000,
+        max_tokens=50000,
         stream=False,
     )
 
-    content = response.choices[0].message.content
+    choice = response.choices[0]
+    message = choice.message
+    content = message.content
 
     if not content:
+        # deepseek-v4-flash 是推理模型：reasoning_content 与 content 都计入 max_tokens，
+        # 推理过长或瞬时故障时 content 可能为空。带上现场信息方便排查。
+        reasoning = getattr(message, "reasoning_content", None) or ""
+
         raise RuntimeError(
-            "DeepSeek returned empty content."
+            "DeepSeek 返回了空内容（message.content 为空）。"
+            f" finish_reason={choice.finish_reason!r}, "
+            f"usage={response.usage!r}, "
+            f"reasoning_content 长度={len(reasoning)}。"
+            "可能是 max_tokens 被推理内容占满或瞬时故障。"
         )
 
     return content
 
 
 def parse_generation_plan(content: str) -> GenerationPlan:
-    """Parse JSON and validate it against GenerationPlan."""
+    """
+    解析并校验模型返回的内容。
+
+    合法：返回 GenerationPlan。
+    不合法：抛出 PlanFormatError，错误信息说明具体原因——
+    是没输出合法 JSON、输出的是数组而非 object、还是缺少必填字段 / 字段类型不对等。
+    """
 
     try:
         data: Any = json.loads(content)
 
     except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            "DeepSeek returned invalid JSON."
+        raise PlanFormatError(
+            "你输出的不是合法 JSON（解析器错误："
+            f"{exc}）。请只输出一个完整的 JSON object，"
+            "不要带 Markdown 代码块、解释文字或其他内容。"
         ) from exc
+
+    if not isinstance(data, dict):
+        raise PlanFormatError(
+            "你输出的 JSON 不是 object（应为 {...}）。"
+            '请输出形如 {"elements": [...], "overall": "..."} 的 JSON object。'
+        )
 
     try:
         return GenerationPlan.model_validate(data)
 
     except ValidationError as exc:
-        raise exc
+        problems = [
+            f"- {'.'.join(str(x) for x in err['loc'])}: {err['msg']}"
+            for err in exc.errors()
+        ]
+
+        raise PlanFormatError(
+            "你输出的 JSON 不符合 GenerationPlan Schema，"
+            "具体问题如下：\n"
+            + "\n".join(problems)
+        ) from exc
+
+
+def build_correction_message(error: Exception) -> str:
+    """根据上一次输出的错误，生成发给模型去修正的提示词。"""
+
+    return f"""
+你上一次返回的内容不合法，请修正后重新输出一个合法的 GenerationPlan JSON。
+
+错误原因：
+
+{error}
+
+请按上述原因修正，并特别注意：
+
+- elements 必须是非空数组，至少包含一个元素
+- 同一主体多次出现时（如多宫格同一只猫）只拆为一个元素：appearance 写一次固定外观，layout/action 用列表逐项对齐（第 i 项位置对应第 i 项行为），每次出现特有的事物写进对应 action 项
+- name 只写主体身份（'橘猫'），不要写成'一格橘猫睡觉的画面'这种包含其他字段信息的描述；'哪一格/位置'写进 layout
+- action 每项是一次出现的行为/互动/当格特有细节；主语就是元素本身，不要重述名称（例如写'正在睡觉'，不写'主语正在睡觉'）
+- 依附于主体的随身/互动道具（伞、剑、书等）并入持有者的 action；对象本身就是主体则独立成元素
+- 多宫格/分镜排版的整体框架（等大画框、留白边框、几行几列）写进 overall 一次
+- 字段类型：count/appearance 是字符串或 null；layout/action 是字符串数组（每项一次出现）或 null
+- layout 与 action 都填写时数组长度必须一致（逐项对齐）
+- overall 必须是字符串或 null；只写画面级全局属性，不要复述元素级细节或整段照抄用户原文
+- 可选项尽量填合理默认值，只有完全无法推断时才用 null
+- 只能返回 JSON，不要输出解释
+"""
 
 def create_generation_plan(
     user_input: str,
@@ -145,8 +207,8 @@ def create_generation_plan(
     """
     Convert natural language into a validated GenerationPlan.
 
-    If DeepSeek returns valid JSON but the structure does not match
-    GenerationPlan, automatically ask DeepSeek to correct the output.
+    每次拿到模型返回后，先打印返回内容，再调用 parse_generation_plan 校验；
+    不合法就带着具体错误原因请模型修正，然后进入下一次调用。
     """
 
     client = create_client()
@@ -172,50 +234,41 @@ def create_generation_plan(
     for attempt in range(max_retries + 1):
 
         try:
-
             content = call_deepseek(
                 client=client,
                 model=model,
                 messages=messages,
             )
 
-            plan = parse_generation_plan(content)
-
-            return plan
-
-        except ValidationError as exc:
-
+        except (RuntimeError, OpenAIError) as exc:
+            # 空内容 / 网络等传输级失败：瞬时故障，直接重试同一次请求，不追加修正
             last_error = exc
 
-            print(
-                f"[planner] 第 {attempt + 1} 次输出不符合 Schema"
-                f"（{exc}），已请求模型修正。"
-            )
+            print(f"[planner] DeepSeek 调用失败（第 {attempt + 1} 次）：{exc}")
 
             if attempt >= max_retries:
                 break
 
-            correction_message = f"""
-你上一次返回的 JSON 不符合 GenerationPlan Schema。
+            continue
 
-验证错误如下：
+        # 先输出模型返回的内容，方便排查
+        print(f"[planner] 第 {attempt + 1} 次返回：")
+        print(content)
+        print()
 
-{exc}
+        try:
+            return parse_generation_plan(content)
 
-请修正 JSON。
+        except PlanFormatError as exc:
 
-特别注意：
+            last_error = exc
 
-- elements 必须是非空数组，至少包含一个元素
-- 每个 element 必须包含 name
-- element 的字段（count/appearance/position/size/action/relation）必须是字符串或 null
-- overall 必须是字符串或 null
-- 可选项尽量填合理默认值，只有完全无法推断时才用 null
-- overall 只写画面级全局属性（风格/构图/光线/氛围等），不要复述元素级细节或整段照抄用户原文
-- 不要把数组/对象字段写成字符串
-- 只能返回 JSON
-- 不要输出解释
-"""
+            print(f"[planner] 第 {attempt + 1} 次输出不合法：")
+            print(exc)
+            print()
+
+            if attempt >= max_retries:
+                break
 
             messages.append(
                 {
@@ -227,17 +280,9 @@ def create_generation_plan(
             messages.append(
                 {
                     "role": "user",
-                    "content": correction_message,
+                    "content": build_correction_message(exc),
                 }
             )
-
-        except RuntimeError as exc:
-
-            last_error = exc
-
-            print(f"[planner] DeepSeek 调用失败：{exc}")
-
-            break
 
     raise RuntimeError(
         "DeepSeek failed to produce a valid GenerationPlan "

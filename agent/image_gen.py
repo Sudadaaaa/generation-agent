@@ -1,58 +1,57 @@
-"""本地 diffusers 生图：Z-Image-Turbo。"""
+"""本地生图统一入口：按参数/环境变量选择后端模型。
+
+用法：
+    from agent.image_gen import create_image_generator
+    gen = create_image_generator(model="flux")   # "zimage" / "flux" / 完整模型 id
+    path = gen.generate("一个女孩微笑", tag="plan")
+"""
 
 import os
-import torch
-from datetime import datetime
 from pathlib import Path
 
-from diffusers import ZImagePipeline
-class ImageGenerator:
-    """把一段中文提示词渲染成一张图片。"""
+from agent.backends import BaseImageBackend, FluxBackend, ZImageBackend
 
-    def __init__(self) -> None:
-        self.model_id = os.getenv("GEN_MODEL", "Tongyi-MAI/Z-Image-Turbo")
-        self.device = os.getenv("GEN_DEVICE", "cuda:0")
-        self.save_dir = Path(os.getenv("OUTPUT_DIR", "outputs"))
-        self._pipe: ZImagePipeline | None = None
+#: 别名 -> 后端类
+BACKENDS: dict[str, type[BaseImageBackend]] = {
+    "zimage": ZImageBackend,
+    "flux": FluxBackend,
+}
 
-    def _load(self) -> ZImagePipeline:
-        if self._pipe is None:
-            # local_files_only：本机网络不可达 HF hub，
-            # 必须强制只用本地缓存，否则 from_pretrained 会卡在联网检查上。
-            #
-            # bf16：模型原生精度（text_encoder/vae 为 bf16，transformer 为 fp32），
-            # 用 fp16 会因中间张量溢出产生 NaN，输出全黑图。
-            self._pipe = ZImagePipeline.from_pretrained(
-                self.model_id,
-                torch_dtype=torch.bfloat16,
-                local_files_only=True,
-            )
+#: 别名 -> 默认本地模型 id
+MODEL_IDS: dict[str, str] = {
+    "zimage": "Tongyi-MAI/Z-Image-Turbo",
+    "flux": "black-forest-labs/FLUX.2-klein-9B",
+}
 
-            # 权重放 CPU，计算时按需搬上 GPU，峰值显存降到单个模块大小，
-            # 适合与其它进程共享、显存实时浮动的机器。
-            self._pipe.enable_model_cpu_offload(device=self.device)
-        return self._pipe
 
-    def generate(self, prompt: str, tag: str = "") -> Path:
-        """生成一张图片并保存，返回文件路径。tag 用于区分输出文件。"""
+def create_image_generator(
+    model: str | None = None,
+    device: str | None = None,
+    output_dir: str | None = None,
+) -> BaseImageBackend:
+    """创建选中的生图后端。
 
-        pipe = self._load()
+    model 可以是别名（zimage/flux）或完整本地模型 id；
+    未指定时依次取 GEN_MODEL 环境变量，缺省用 zimage。
+    后端按模型名自动识别，未知 id 默认 ZImage。
+    """
 
-        image = pipe(
-            prompt=prompt,
-            height=1024,
-            width=1024,
-            num_inference_steps=8,
-            guidance_scale=2.0,
-            generator=torch.Generator("cuda").manual_seed(42),
-        ).images[0]
+    model = model or os.getenv("GEN_MODEL") or "zimage"
+    device = device or os.getenv("GEN_DEVICE") or "cuda:0"
+    output_dir = output_dir or os.getenv("OUTPUT_DIR") or "outputs"
 
-        self.save_dir.mkdir(parents=True, exist_ok=True)
+    alias = model.strip().lower()
 
-        tag_part = f"_{tag}" if tag else ""
-        # 毫秒级时间戳 + tag，避免同一次运行连续出图时文件名冲突
-        fname = f"img_{datetime.now():%Y%m%d_%H%M%S%f}{tag_part}.png"
-        path = self.save_dir / fname
-        image.save(path)
+    if alias in BACKENDS:
+        backend_cls = BACKENDS[alias]
+        model_id = MODEL_IDS[alias]
+    else:
+        # 完整本地模型 id：按名字自动识别后端
+        model_id = model
+        backend_cls = FluxBackend if "flux" in model.lower() else ZImageBackend
 
-        return path
+    return backend_cls(
+        model_id=model_id,
+        device=device,
+        save_dir=Path(output_dir),
+    )

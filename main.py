@@ -2,13 +2,14 @@ import argparse
 
 from dotenv import load_dotenv
 
-from agent.image_gen import ImageGenerator
+from agent.backends import BaseImageBackend
+from agent.image_gen import create_image_generator
 from agent.planner import create_generation_plan
 
 
 def run_once(
     user_input: str,
-    generator: ImageGenerator | None,
+    generator: BaseImageBackend | None,
 ) -> None:
     plan = create_generation_plan(user_input)
 
@@ -50,6 +51,13 @@ def main() -> None:
         help="图片生成需求；省略则进入交互模式",
     )
     parser.add_argument(
+        "--model",
+        help=(
+            "生图模型：zimage / flux / 或完整本地模型 id；"
+            "默认取 GEN_MODEL 环境变量（缺省 zimage）"
+        ),
+    )
+    parser.add_argument(
         "--no-image",
         action="store_true",
         help="只生成计划，不生成图片",
@@ -57,7 +65,9 @@ def main() -> None:
     args = parser.parse_args()
 
     # 惰性加载：即使创建对象也不占用显存，首次 generate 时才加载模型
-    generator = None if args.no_image else ImageGenerator()
+    generator = None if args.no_image else create_image_generator(
+        model=args.model,
+    )
 
     print("=" * 60)
     print("Generative AI Generation Planner")
