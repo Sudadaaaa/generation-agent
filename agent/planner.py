@@ -8,15 +8,14 @@ from pydantic import ValidationError
 from schemas.generation_plan import GenerationPlan
 
 SYSTEM_PROMPT = """
-你是一个 Generative AI Generation Planner。
+你是一个 Generative AI 图像提示词规划器。
 
-你的任务是将用户的自然语言生成需求转换为严格的
+你的任务是把用户的自然语言图片生成需求转换为严格的
 GenerationPlan JSON。
 
-你不是 Prompt Enhancer。
+你是一个结构化提取器，不是 Prompt Enhancer。
 
 不要生成最终图片 Prompt。
-不要生成最终视频 Prompt。
 不要输出解释。
 只能输出 JSON。
 
@@ -25,27 +24,34 @@ GenerationPlan JSON。
 1. 必须严格遵循提供的 JSON Schema。
 2. 不要增加 Schema 中不存在的字段。
 3. 不要删除必要字段。
-4. object 类型字段必须输出 object，不能压缩成字符串。
-5. 如果字段没有相关信息：
-   - Optional object 可以使用 null。
-   - object 内部字段可以使用 null。
-6. 用户明确提供的信息必须尽可能完整地保留。
-7. 用户要求出现的文字必须保持原文。
-8. 不要凭空添加与用户需求冲突的信息。
-
-任务分类：
-
-text_to_image:
-用户要求从文字生成图片。
-
-image_to_image:
-用户要求修改、重绘、转换已有图片。
-
-text_to_video:
-用户要求从文字生成视频。
-
-image_to_video:
-用户提供已有图片，并要求让图片动起来或生成视频。
+4. 把画面拆解为多个基本元素（elements），每个元素是画面中一个可指认的事物。
+5. 每个元素必须包含 name。
+6. 用户没有明确给出的可选字段（count/appearance/position/size/action/relation），
+   不要留 null，应根据画面场景与元素类型，用最合理、最常见的默认值自动补齐。
+   例如：单一主体默认放在画面中央、占据主体；人物默认补全常见的中性外观与姿态
+   （如"少女，长发，浅色上衣，自然表情"）。
+   自动补齐必须与用户需求一致，不得冲突。
+7. 动作引发的瞬态效果（如：跳跃溅起的水花、扬起的尘土）写入该元素的 action。
+8. 元素外观（appearance）应按元素类型覆盖完整：
+   人物→年龄感、体型、发型、发色、五官、肤色、服饰、表情；
+   物体→形状、颜色、材质、纹理、破损或新旧，及物体上印刻的文字（保持原文）；
+   自然元素→形态、颜色、光照感。
+   用户未提到的方面用该类元素最常见的中性默认补全。
+9. 描述元素关系时，引用其他元素的 name（如"站在草坪上"），
+   也可引用'镜头/天空/远方/画面外'等全局参照（如"凝视镜头"）。
+10. 画面级属性（overall）用一段简洁连贯的中文描述，只写画面级（全局）属性，按需覆盖：
+    风格（写实摄影/Cinematic/2D动画/3D CG/水彩/水墨/赛博朋克/复古胶片等）、
+    构图与镜头（景别、机位角度、透视、景深）、光线（时间、光源、方向）、
+    天气与环境、色调与氛围、画幅比、视觉特效（光斑、倒影、颗粒感、长曝光）、
+    画质与细节、不应出现的内容。
+    注意：
+    - overall 只放画面级属性；元素的细节（外观/动作/位置/服饰/表情/五官等）只写进对应 element，
+      不要在 overall 中复述或整段照抄用户原文；
+    - 写成简洁的一到两句话，不要用"构图：""光线：""色调："之类的标签罗列；
+    - 用户未提到的方面按画面最合理的方式默认补齐，只有完全无法推断时才用 null。
+11. 元素上出现的文字（如招牌、书名、标语）属于该元素的描述，必须保持用户原文逐字保留，不得改写或翻译。
+12. 用户明确提供的信息必须尽可能完整地保留。
+13. 自动补齐的默认信息不得与用户需求冲突；不要凭空编造与画面无关的新元素或实体。
 
 最终只能输出符合 JSON Schema 的 JSON object。
 """
@@ -181,6 +187,11 @@ def create_generation_plan(
 
             last_error = exc
 
+            print(
+                f"[planner] 第 {attempt + 1} 次输出不符合 Schema"
+                f"（{exc}），已请求模型修正。"
+            )
+
             if attempt >= max_retries:
                 break
 
@@ -195,15 +206,13 @@ def create_generation_plan(
 
 特别注意：
 
-- subject 必须是 object
-- environment 必须是 object
-- camera 必须是 object 或 null
-- composition 必须是 object 或 null
-- style 必须是 object 或 null
-- text 必须是 object 或 null
-- generation 必须存在
-- generation 必须包含 model 和 duration
-- 不要把 object 类型字段写成字符串
+- elements 必须是非空数组，至少包含一个元素
+- 每个 element 必须包含 name
+- element 的字段（count/appearance/position/size/action/relation）必须是字符串或 null
+- overall 必须是字符串或 null
+- 可选项尽量填合理默认值，只有完全无法推断时才用 null
+- overall 只写画面级全局属性（风格/构图/光线/氛围等），不要复述元素级细节或整段照抄用户原文
+- 不要把数组/对象字段写成字符串
 - 只能返回 JSON
 - 不要输出解释
 """
@@ -225,6 +234,9 @@ def create_generation_plan(
         except RuntimeError as exc:
 
             last_error = exc
+
+            print(f"[planner] DeepSeek 调用失败：{exc}")
+
             break
 
     raise RuntimeError(

@@ -1,178 +1,141 @@
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 
-class Subject(BaseModel):
-    """The main subject of the generation."""
+class Element(BaseModel):
+    """画面中的一个基本元素。"""
 
-    description: str = Field(
-        description="Description of the main subject."
+    name: str = Field(
+        description=(
+            "元素是什么（类别或身份），例如：女孩、成年男性、橘猫、木船、草坪、太阳。"
+        )
+    )
+
+    count: Optional[str] = Field(
+        default=None,
+        description="数量，例如：一个、两只、三朵、一片、成群。",
+    )
+
+    appearance: Optional[str] = Field(
+        default=None,
+        description=(
+            "外观：形状、颜色、材质、纹理、新旧/状态等。"
+            "按元素类型覆盖：人物→年龄感、体型、发型、发色、五官、肤色、服饰、表情；"
+            "物体→形状、颜色、材质、纹理、破损或新旧，及物体上印刻的文字（保持原文）；"
+            "自然元素→形态、颜色、光照感。"
+            "例如：金发白裙、翠绿、橙色发光、漆皮剥落、红底白字'营业中'。"
+        ),
+    )
+
+    position: Optional[str] = Field(
+        default=None,
+        description=(
+            "元素在画面中的位置与景深层次，例如：中央、前景、中景、背景、"
+            "左上方、远处。不要包含'画面'二字。单一主体默认'中央'。"
+        ),
+    )
+
+    size: Optional[str] = Field(
+        default=None,
+        description="相对大小，例如：大、小、占据画面一半。",
     )
 
     action: Optional[str] = Field(
         default=None,
-        description="Action performed by the subject."
-    )
-
-    position: Optional[str] = Field(
-        default=None,
-        description="Position of the subject in the frame."
-    )
-
-
-class Environment(BaseModel):
-    """The scene and environment."""
-
-    description: str = Field(
-        description="Description of the environment or scene."
-    )
-
-    time: Optional[str] = Field(
-        default=None,
-        description="Time of day, such as morning, sunset, or night."
-    )
-
-    weather: Optional[str] = Field(
-        default=None,
-        description="Weather conditions, such as rain, snow, or clear."
-    )
-
-
-class Camera(BaseModel):
-    """Camera and cinematography information."""
-
-    shot_type: Optional[str] = Field(
-        default=None,
         description=(
-            "Shot type, such as close-up, medium shot, "
-            "wide shot, or extreme wide shot."
+            "动作、姿态或状态，例如：张开双手、奔跑、飘动、发光。"
+            "动作引发的瞬态效果也写入此字段，如：跳跃溅起的水花、奔跑扬起的尘土。"
+            "没有明确动作时填'静止'或该类元素最常见的状态。"
         ),
     )
 
-    angle: Optional[str] = Field(
-        default=None,
-        description="Camera angle, such as eye-level, low-angle, or high-angle.",
-    )
-
-    movement: Optional[str] = Field(
+    relation: Optional[str] = Field(
         default=None,
         description=(
-            "Camera movement, such as dolly in, dolly out, "
-            "pan, tilt, tracking, or static."
+            "该元素与其他元素的空间/语义关系，引用元素名称描述，"
+            "也可引用'镜头/天空/远方/画面外'等全局参照。"
+            "例如：站在草坪上、面对太阳、在房子后面、手里拿着一本书、凝视镜头。"
         ),
     )
 
+    def to_prompt_text(self) -> str:
+        """把单个元素渲染成一个自然的中文句子。"""
 
-class Composition(BaseModel):
-    """Visual composition information."""
+        parts: list[str] = []
 
-    description: Optional[str] = Field(
-        default=None,
-        description="Description of the overall composition."
-    )
+        subject = f"{self.count}{self.name}" if self.count else self.name
+        parts.append(subject)
 
-    aspect_ratio: str = Field(
-        default="16:9",
-        description="Desired output aspect ratio."
-    )
+        if self.appearance:
+            parts.append(self.appearance)
 
+        if self.position:
+            parts.append(f"位于{self.position}")
 
-class Style(BaseModel):
-    """Visual style information."""
+        if self.size:
+            parts.append(self.size)
 
-    description: Optional[str] = Field(
-        default=None,
-        description="Overall visual or artistic style."
-    )
+        if self.relation:
+            parts.append(self.relation)
 
-    lighting: Optional[str] = Field(
-        default=None,
-        description="Lighting characteristics."
-    )
+        if self.action:
+            parts.append(self.action)
 
-    color: Optional[str] = Field(
-        default=None,
-        description="Color palette or color characteristics."
-    )
-
-
-class TextElement(BaseModel):
-    """Text that should appear inside the generated image or video."""
-
-    content: str = Field(
-        description="Exact text that should appear in the generated media."
-    )
-
-    position: Optional[str] = Field(
-        default=None,
-        description="Desired position of the text."
-    )
-
-    style: Optional[str] = Field(
-        default=None,
-        description="Visual style of the text."
-    )
-
-
-class GenerationConfig(BaseModel):
-    """Generation-related configuration."""
-
-    model: Optional[str] = Field(
-        default=None,
-        description="Suggested generation model."
-    )
-
-    duration: Optional[float] = Field(
-        default=None,
-        description="Video duration in seconds. Null for image generation."
-    )
+        return "，".join(parts) + "。"
 
 
 class GenerationPlan(BaseModel):
     """
-    Structured representation of a user's generative media request.
+    一张图片的完整结构化提示词。
 
-    This is the central intermediate representation of the project.
+    把画面拆解为多个基本元素，每个元素用一套通用字段描述；
+    overall 用一段字符串描述画面级（全局）属性。
+    可直接序列化渲染为生图模型的 Prompt 文本。
     """
 
-    task: Literal[
-        "text_to_image",
-        "image_to_image",
-        "text_to_video",
-        "image_to_video",
-    ] = Field(
-        description="Type of generative media task."
+    elements: list[Element] = Field(
+        min_length=1,
+        description="画面中的基本元素列表，至少一个。",
     )
 
-    subject: Subject = Field(
-        description="Main subject of the generation."
-    )
-
-    environment: Environment = Field(
-        description="Scene and environment."
-    )
-
-    camera: Optional[Camera] = Field(
+    overall: Optional[str] = Field(
         default=None,
-        description="Camera and cinematography information."
+        description=(
+            "画面整体（全局）属性，用一段简洁的中文描述，只写画面级属性，按需覆盖："
+            "①风格（写实摄影、电影感Cinematic、2D动画、3D CG、水彩、水墨、油画、"
+            "赛博朋克、复古胶片）；"
+            "②构图与镜头（景别：特写/近景/中景/全景/远景；"
+            "机位角度：平视/仰视/俯视/顶视；透视：广角/长焦/鱼眼/单点透视；"
+            "景深：浅景深/背景虚化）；"
+            "③光线（时间、光源、方向，如：黄昏暖光、顶光、侧逆光）；"
+            "④天气与环境（如：雨后、微风吹拂、雾气、夜色）；"
+            "⑤色调与氛围；⑥画幅比（如：横构图、竖构图、方形构图）；"
+            "⑦镜头/视觉特效（如：光斑、倒影、颗粒感、长曝光）；"
+            "⑧画质与细节；⑨不应出现的内容。"
+            "注意：元素的细节（外观/动作/位置/服饰/表情等）只写在对应 element 中，"
+            "用户未提到的方面按画面最合理的方式默认补齐，无法推断才为 null。"
+        ),
     )
 
-    composition: Optional[Composition] = Field(
-        default=None,
-        description="Composition information."
-    )
+    def to_prompt_text(self) -> str:
+        """把结构化计划渲染成一段连贯的中文提示词文本。"""
 
-    style: Optional[Style] = Field(
-        default=None,
-        description="Visual style information."
-    )
+        segments: list[str] = []
 
-    text: Optional[TextElement] = Field(
-        default=None,
-        description="Text that should appear in the generated media."
-    )
+        intro = "生成一幅图片"
 
-    generation: GenerationConfig = Field(
-        description="Generation configuration."
-    )
+        if self.overall:
+            intro += f"，画面整体：{self.overall.rstrip('，。； ')}"
+
+        segments.append(intro + "。")
+
+        if len(self.elements) == 1:
+            segments.append(self.elements[0].to_prompt_text())
+        else:
+            segments.append("画面包含以下元素：")
+
+            for i, el in enumerate(self.elements, 1):
+                segments.append(f"元素{i}：{el.to_prompt_text()}")
+
+        return "".join(segments)
