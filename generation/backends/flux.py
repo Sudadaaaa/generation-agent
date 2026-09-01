@@ -5,7 +5,7 @@ from PIL import Image
 
 from diffusers import Flux2KleinPipeline
 
-from agent.backends.base import BaseImageBackend
+from generation.backends.base import BaseImageBackend
 
 #: 蒸馏 klein 模型的推荐步数（少步数出图，兼顾质量与速度）
 NUM_INFERENCE_STEPS = 12

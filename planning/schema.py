@@ -48,7 +48,7 @@ class Element(BaseModel):
         description=(
             "该元素每次出现的位置、景深层次与相对大小，列表的每一项是一次出现，"
             "与 action 逐项对齐（第 i 项位置对应第 i 项行为）。"
-            "只出现一次时是单元素列表，如 ['画面中央，占据主体']；"
+            "只出现一次时是单元素列表，如 ['画面中央']；"
             "多宫格/分镜时每格一项，如 ['九宫格左上角第一格', '九宫格正上方中间第二格']。"
             "多宫格时只写所在格子；格子大小、形状、间距、边框等共有框架信息写进 overall。"
         ),
@@ -135,11 +135,6 @@ class Element(BaseModel):
             items.append(clause)
 
         return f"{head}，共出现{n}次：" + "；".join(items) + "。"
-
-    def to_prompt_text(self) -> str:
-        """兼容：该元素渲染成一句提示词。"""
-
-        return self.to_prompt_text_line()
 
 
 class GenerationPlan(BaseModel):

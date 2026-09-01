@@ -5,7 +5,12 @@ from PIL import Image
 
 from diffusers import ZImagePipeline
 
-from agent.backends.base import BaseImageBackend
+from generation.backends.base import BaseImageBackend
+
+#: 蒸馏 turbo 模型的推荐步数（少步数出图，兼顾质量与速度）
+NUM_INFERENCE_STEPS = 9
+#: turbo 是蒸馏模型，官方配方不走 CFG
+GUIDANCE_SCALE = 0
 
 
 class ZImageBackend(BaseImageBackend):
@@ -37,7 +42,7 @@ class ZImageBackend(BaseImageBackend):
             prompt=prompt,
             height=1024,
             width=1024,
-            num_inference_steps=9,
-            guidance_scale=0,
+            num_inference_steps=NUM_INFERENCE_STEPS,
+            guidance_scale=GUIDANCE_SCALE,
             generator=self._generator(),
         ).images[0]

@@ -13,7 +13,7 @@ class BaseImageBackend(ABC):
 
     子类只需实现 _load()（加载并缓存 pipeline）和 _generate()（调用
     pipeline 生成一张图）；保存文件、文件名等公共逻辑都在 generate() 里。
-    新增模型 = 新建一个后端文件 + 在 image_gen.py 注册一行。
+    新增模型 = 新建一个后端文件 + 在 generation/factory.py 注册一行。
     """
 
     def __init__(
@@ -37,7 +37,7 @@ class BaseImageBackend(ABC):
 
     def _generator(self) -> torch.Generator:
         """默认随机源，保证同一提示词结果可复现；子类可覆写。"""
-        return torch.Generator("cuda").manual_seed(42)
+        return torch.Generator(device=self.device).manual_seed(42)
 
     def generate(self, prompt: str, tag: str = "") -> Path:
         """生成一张图片并保存，返回文件路径。tag 用于区分输出文件。"""

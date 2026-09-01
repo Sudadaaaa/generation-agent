@@ -1,15 +1,14 @@
-"""本地生图统一入口：按参数/环境变量选择后端模型。
+"""本地生图统一入口：按参数选择后端模型。
 
 用法：
-    from agent.image_gen import create_image_generator
+    from generation.factory import create_image_generator
     gen = create_image_generator(model="flux")   # "zimage" / "flux" / 完整模型 id
     path = gen.generate("一个女孩微笑", tag="plan")
 """
 
-import os
 from pathlib import Path
 
-from agent.backends import BaseImageBackend, FluxBackend, ZImageBackend
+from generation.backends import BaseImageBackend, FluxBackend, ZImageBackend
 
 #: 别名 -> 后端类
 BACKENDS: dict[str, type[BaseImageBackend]] = {
@@ -26,19 +25,21 @@ MODEL_IDS: dict[str, str] = {
 
 def create_image_generator(
     model: str | None = None,
-    device: str | None = None,
     output_dir: str | None = None,
 ) -> BaseImageBackend:
     """创建选中的生图后端。
 
-    model 可以是别名（zimage/flux）或完整本地模型 id；
-    未指定时依次取 GEN_MODEL 环境变量，缺省用 zimage。
+    model 可以是别名（zimage/flux）或完整本地模型 id，缺省 zimage；
+    output_dir 缺省 outputs。生图设备写死为逻辑 cuda:1，物理卡由调用方
+    在 torch 导入前用环境变量 CUDA_VISIBLE_DEVICES 指定（main.py 顶部设置）。
     后端按模型名自动识别，未知 id 默认 ZImage。
     """
 
-    model = model or os.getenv("GEN_MODEL") or "zimage"
-    device = device or os.getenv("GEN_DEVICE") or "cuda:0"
-    output_dir = output_dir or os.getenv("OUTPUT_DIR") or "outputs"
+    model = model or "zimage"
+    # 生图固定用逻辑 cuda:1。配合 main.py 顶部的 CUDA_VISIBLE_DEVICES，
+    # 例如设为 "4,5" 时 cuda:1 = 物理卡 5。
+    device = "cuda:1"
+    output_dir = output_dir or "outputs"
 
     alias = model.strip().lower()
 

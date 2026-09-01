@@ -1,0 +1,11 @@
+# Runtime dependencies
+python-dotenv
+openai
+pydantic>=2
+torch
+diffusers
+Pillow
+
+# Optional — only needed for --llm local (LocalQwen3PlanLLM)
+# transformers
+# peft   # only if you also use LoRA adapter (--lora-path)

@@ -1,17 +1,26 @@
+import os
+
+# 物理卡选择：本地 LLM 固定逻辑 cuda:0、生图固定逻辑 cuda:1。
+# 这里决定这两张逻辑卡映射到哪两张物理卡（换卡只改这一行）。
+# 必须在任何 torch 导入之前设置，否则掩码不生效。
+os.environ["CUDA_VISIBLE_DEVICES"] = "4,5"
+
 import argparse
 
 from dotenv import load_dotenv
 
-from agent.backends import BaseImageBackend
-from agent.image_gen import create_image_generator
-from agent.planner import create_generation_plan
+from agent import agent_plan
+from generation.backends import BaseImageBackend
+from generation.factory import create_image_generator
+from planning import PlanLLM, create_plan_llm
 
 
 def run_once(
     user_input: str,
     generator: BaseImageBackend | None,
+    llm: PlanLLM | None = None,
 ) -> None:
-    plan = create_generation_plan(user_input)
+    plan = agent_plan(user_input, llm=llm)
 
     print("=" * 60)
     print("Generation Plan")
@@ -52,29 +61,42 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        help=(
-            "生图模型：zimage / flux / 或完整本地模型 id；"
-            "默认取 GEN_MODEL 环境变量（缺省 zimage）"
-        ),
+        help="生图模型：zimage / flux / 或完整本地模型 id；缺省 zimage",
+    )
+    parser.add_argument(
+        "--output-dir",
+        help="图片输出目录；缺省 outputs",
     )
     parser.add_argument(
         "--no-image",
         action="store_true",
         help="只生成计划，不生成图片",
     )
+    parser.add_argument(
+        "--llm",
+        choices=["deepseek", "qwen"],
+        help=(
+            "生成计划的模型提供方：deepseek（DeepSeek 云端 API）/ "
+            "qwen（本地 Qwen3-8B）；缺省 deepseek"
+        ),
+    )
     args = parser.parse_args()
 
     # 惰性加载：即使创建对象也不占用显存，首次 generate 时才加载模型
     generator = None if args.no_image else create_image_generator(
         model=args.model,
+        output_dir=args.output_dir,
     )
+
+    # Plan 生成模型：也惰性加载（qwen 首次 complete 才占显存）
+    llm = create_plan_llm(args.llm)
 
     print("=" * 60)
     print("Generative AI Generation Planner")
     print("=" * 60)
 
     if args.input:
-        run_once(args.input, generator)
+        run_once(args.input, generator, llm)
         return
 
     print("\n请输入你的生成需求。")
@@ -92,7 +114,7 @@ def main() -> None:
             continue
 
         try:
-            run_once(user_input, generator)
+            run_once(user_input, generator, llm)
         except Exception as exc:
             print("\n发生错误：")
             print(exc)
