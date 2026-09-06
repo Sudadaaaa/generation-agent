@@ -12,7 +12,7 @@ agent/ 编排层（计划→评审→修正→通过 循环）
    ├─ 评审：独立模型（缺省 DeepSeek 云端）对照需求检查遗漏/矛盾/偏离，
    │            不通过则带问题修正（避免同模型自我评审盖章式通过）
    ↓
-GenerationPlan → 渲染为中文生图提示词
+GenerationPlan → LLM 渲染为自然语言提示词（语言随 plan，不写死中文）
    ↓
 generation/  本地出图（Z-Image / FLUX）→ PNG
 ```
@@ -53,7 +53,8 @@ GPU 分配：固定逻辑卡号，物理卡在 `main.py` 顶部指定
 
 ```
 agent/      编排层：持有「提取→评审→修正→通过」循环（真 agent 逻辑）
-planning/   LLM 结构化提取层（schema / prompts / llm / extract）
+planning/   提取 + 渲染层：结构化提取（schema / prompts / llm / extract）
+            与 Plan→最终提示词的 LLM 渲染（render）
 generation/ 图片生成层（factory + backends: base / zimage / flux）
 main.py     CLI 入口
 ```

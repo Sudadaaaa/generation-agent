@@ -9,10 +9,11 @@ import argparse
 
 from dotenv import load_dotenv
 
-from agent import agent_plan
+from agent import agent_plan_review
 from generation.backends import BaseImageBackend
 from generation.factory import create_image_generator
 from planning import PlanLLM, create_plan_llm
+from planning.render import build_final_prompt
 
 
 def run_once(
@@ -20,17 +21,20 @@ def run_once(
     generator: BaseImageBackend | None,
     llm: PlanLLM | None = None,
 ) -> None:
-    plan = agent_plan(user_input, llm=llm)
+    llm = llm or create_plan_llm()
 
-    print("=" * 60)
-    print("Generation Plan")
-    print("=" * 60)
+    # 人机评审循环：每版计划展示给用户，合并用户意见与评审问题回传修正，
+    # 直到用户回车确认通过（或 p 强制通过）才继续；q/放弃则返回 None。
+    # 计划 JSON 已在循环内逐版打印，这里不再重复。
+    plan = agent_plan_review(user_input, llm=llm)
 
-    print(plan.model_dump_json(indent=2))
+    if plan is None:
+        print("\n本次已放弃，未生成图片。\n")
+        return
 
-    prompt = plan.to_prompt_text()
-
-    print("\n--- 渲染提示词 ---")
+    # 走到这里 = 计划已被用户确认 → 才渲染最终提示词、才出图（决策：确认后才出图）
+    print("\n--- 渲染最终提示词 ---")
+    prompt = build_final_prompt(plan, llm, user_input=user_input)
     print(prompt)
 
     if generator is not None:
@@ -41,7 +45,7 @@ def run_once(
         raw_path = generator.generate(user_input, tag="raw")
         print(f"[原始提示词] 图片已保存：{raw_path}")
 
-        # 2) 用 gen_plan 结构化提示词出图
+        # 2) 用确认后计划渲染的结构化提示词出图
         plan_path = generator.generate(prompt, tag="plan")
         print(f"[gen_plan提示词] 图片已保存：{plan_path}")
 
@@ -53,11 +57,6 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(
         description="把图片生成需求转换为结构化计划并出图"
-    )
-    parser.add_argument(
-        "input",
-        nargs="?",
-        help="图片生成需求；省略则进入交互模式",
     )
     parser.add_argument(
         "--model",
@@ -95,12 +94,7 @@ def main() -> None:
     print("Generative AI Generation Planner")
     print("=" * 60)
 
-    if args.input:
-        run_once(args.input, generator, llm)
-        return
-
-    print("\n请输入你的生成需求。")
-    print("输入 exit 退出。\n")
+    print("\n请输入你的生成需求（exit 退出）。\n")
 
     while True:
         user_input = input("> ").strip()

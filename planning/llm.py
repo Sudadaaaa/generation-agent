@@ -32,8 +32,17 @@ class PlanLLM(ABC):
     """
 
     @abstractmethod
-    def complete(self, messages: list[dict[str, str]]) -> str:
-        """调用模型，返回其文本回复。空内容/调用失败应抛 RuntimeError。"""
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        json_mode: bool = True,
+    ) -> str:
+        """调用模型，返回其文本回复。空内容/调用失败应抛 RuntimeError。
+
+        json_mode=True 时请求结构化（JSON）输出；False 时返回自由文本，
+        供渲染最终提示词等非结构化任务使用。
+        """
 
 
 class DeepSeekPlanLLM(PlanLLM):
@@ -48,15 +57,24 @@ class DeepSeekPlanLLM(PlanLLM):
             self._client = create_client()
         return self._client
 
-    def complete(self, messages: list[dict[str, str]]) -> str:
-        response = self._ensure_client().chat.completions.create(
-            model=self.model,
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=0.1,
-            max_tokens=50000,
-            stream=False,
-        )
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        json_mode: bool = True,
+    ) -> str:
+        kwargs: dict[str, object] = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": 50000,
+            "stream": False,
+        }
+
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+
+        response = self._ensure_client().chat.completions.create(**kwargs)
 
         choice = response.choices[0]
         message = choice.message
@@ -101,7 +119,7 @@ class LocalQwen3PlanLLM(PlanLLM):
         model_path: str | None = None,
         device: str | None = None,
         lora_path: str | None = None,
-        max_new_tokens: int = 4096,
+        max_new_tokens: int = 40960,
         enable_thinking: bool = True,
     ) -> None:
         self.model_path = model_path or "Qwen/Qwen3-8B"
@@ -149,7 +167,12 @@ class LocalQwen3PlanLLM(PlanLLM):
             self._model = PeftModel.from_pretrained(self._model, self.lora_path)
             self._model.eval()
 
-    def complete(self, messages: list[dict[str, str]]) -> str:
+    def complete(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        json_mode: bool = True,  # 本地模型本就不约束 JSON 输出，此参数忽略
+    ) -> str:
         self._load()
         assert self._tokenizer is not None and self._model is not None
 
