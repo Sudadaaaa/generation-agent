@@ -1,21 +1,29 @@
 # generation-agent
 
-把自然语言的图片生成需求转换为严格的结构化计划（GenerationPlan），再由本地生图模型渲染成图。
+把自然语言的图片生成需求一步步变成一张图：先结构化出 **GenerationPlan**，经**人机评审会**定稿，
+再渲染成自然语言最终提示词，最后交给本地生图模型出图（可选，环境配置决定）。
 
 ## 流程
 
 ```
-用户需求
+用户需求（交互输入）
+   ↓  大脑 = DeepSeek 云端（ReAct + 原生 function calling），自主编排：
+make_plan → review（人机评审会 = 确认门）→ render → generate
+   │        ↑                       │
+   │      revise（问题+你的意见自动带回 make_plan 修订，直到你确认）
    ↓
-agent/ 编排层（计划→评审→修正→通过 循环）
-   ├─ planning/  LLM 结构化提取（DeepSeek 云端 API 或本地 Qwen3）
-   ├─ 评审：独立模型（缺省 DeepSeek 云端）对照需求检查遗漏/矛盾/偏离，
-   │            不通过则带问题修正（避免同模型自我评审盖章式通过）
-   ↓
-GenerationPlan → LLM 渲染为自然语言提示词（语言随 plan，不写死中文）
-   ↓
-generation/  本地出图（Z-Image / FLUX）→ PNG
+GenerationPlan（结构化）→ LLM 渲染为最终提示词 → generation/ 本地出图 PNG
 ```
+
+关键机制（详见 [docs/agent_design.md](docs/agent_design.md)）：
+
+- **review = 确认门**：机器先按你的需求挑问题，你在同一交互里回车/p/q/补意见；
+  只有 `confirmed` 定稿才允许 render/generate（门控由工具自报，可离线测试）。
+- **谁干什么各归其层**：`domain/` 领域工序（提示词单一来源）· `llm/` 传输适配 ·
+  `agentkit/` 通用 agent 机制（零图像知识）· `tools/` 本 agent 的工具实现 · `config.py` 环境配置。
+- **qwen 只当 plan 工人**（本地 Qwen3，`AGENT_WORKER_PROVIDER=qwen`），不是大脑。
+- **连续会话**：main 就是一个整场 while，user/工具结果/模型返回都进同一份 transcript——出图后说
+  「在刚才基础上加 XX 再生成」会基于上一版已确认计划续版；重置对话 = 重跑 main（无步数/调用上限）。
 
 ## 安装
 
@@ -25,36 +33,26 @@ generation/  本地出图（Z-Image / FLUX）→ PNG
 
 ## 使用
 
-    cp .env.example .env    # 填入 DEEPSEEK_API_KEY，按需改 LLM_MODEL
+    cp .env.example .env   # 填 DEEPSEEK_API_KEY，按需改 AGENT_* 键
+    python main.py         # 无命令行参数：main 就是一个整场主循环（transcript 全程保留）；
+                           # 「在刚才基础上加 XX 再生成」可直接续作；exit 退出；重跑 main = 新会话
 
-    python main.py "一个女孩在夕阳下放风筝"
-    python main.py "一只橘猫在窗台上打盹" --no-image
-    python main.py "..." --llm qwen
-    python main.py          # 交互模式（输入 exit 退出）
+干跑 / 只出提示词：`.env` **不配** `AGENT_IMAGE_MODEL`（注册的工具集里就没有 generate）。
+想真出图：给 `AGENT_IMAGE_MODEL` 配 `zimage` / `flux` / 本地模型 id。
 
-GPU 分配：固定逻辑卡号，物理卡在 `main.py` 顶部指定
-
-本地 LLM（`--llm qwen`）固定用逻辑 `cuda:0`，生图固定用逻辑 `cuda:1`。
-两者是**逻辑卡号**——映射到哪张物理卡由 `main.py` 顶部的
-`CUDA_VISIBLE_DEVICES` 决定（换卡只改那一行）：
-
-    os.environ["CUDA_VISIBLE_DEVICES"] = "4, 5"
-    # → 逻辑 0 = 物理卡 4（LLM），逻辑 1 = 物理卡 5（生图），两模型不抢卡
-
-参数：
-
-- `input`：图片生成需求；省略则进入交互模式
-- `--llm {deepseek,qwen}`：生成计划的模型提供方，缺省 deepseek
-- `--model {zimage,flux,…}`：生图模型，缺省 zimage
-- `--output-dir`：图片输出目录，缺省 outputs
-- `--no-image`：只生成计划，不出图
+GPU：本地 LLM（qwen）固定逻辑 `cuda:0`、生图固定逻辑 `cuda:1`；映射到哪张物理卡由
+`main.py` 顶部的 `CUDA_VISIBLE_DEVICES` 决定（换卡只改那一行）。
 
 ## 结构
 
 ```
-agent/      编排层：持有「提取→评审→修正→通过」循环（真 agent 逻辑）
-planning/   提取 + 渲染层：结构化提取（schema / prompts / llm / extract）
-            与 Plan→最终提示词的 LLM 渲染（render）
-generation/ 图片生成层（factory + backends: base / zimage / flux）
-main.py     CLI 入口
+main.py     会话 CLI：无参数，读配置 → 进主循环
+config.py   .env → AgentConfig（大脑/工人/评审模型、生图可用性）
+domain/     领域工序：schema / prompts / extraction / critique / rendering（无状态）
+llm/        传输适配：ChatClient 协议 + DeepSeekChat(原生 function calling) + LocalQwenChat
+agentkit/   通用 agent 机制：Tool/Registry(MCP 同构)、policy、runtime(agent_act 会话级单步)、io、usage
+tools/      本 agent 工具：make_plan / review / render / generate（build_tools 注册）
+generation/ 生图执行器（factory + backends: base / zimage / flux）
+tests/      零依赖离线回归：python -m tests
+docs/       agent_design.md（架构 + 接缝）
 ```

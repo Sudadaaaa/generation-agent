@@ -1,12 +1,11 @@
 import json
 from typing import Any
 
-from openai import OpenAIError
 from pydantic import ValidationError
 
-from planning.llm import PlanLLM, create_plan_llm
-from planning.prompts import build_correction_message, build_system_prompt
-from planning.schema import GenerationPlan
+from domain.prompts import build_correction_message, build_system_prompt
+from domain.schema import GenerationPlan
+from llm.base import ChatClient
 
 
 class PlanFormatError(RuntimeError):
@@ -56,8 +55,9 @@ def parse_generation_plan(content: str) -> GenerationPlan:
 
 def create_generation_plan(
     user_input: str,
+    *,
+    llm: ChatClient,
     max_retries: int = 2,
-    llm: PlanLLM | None = None,
     context_messages: list[dict[str, str]] | None = None,
 ) -> GenerationPlan:
     """
@@ -65,12 +65,10 @@ def create_generation_plan(
 
     每次拿到模型返回后，先打印返回内容，再调用 parse_generation_plan 校验；
     不合法就带着具体错误原因请模型修正，然后进入下一次调用。
-    llm 缺省时用 create_plan_llm() 创建（默认 deepseek）。
+    llm 是规划工人客户端，由调用方注入（worker 具体 deepseek 或 qwen）。
     context_messages：可选，追加在初始 user 消息之后（如上一版计划 + 评审修正要求），
-    供 agent 层的「评审→修正」循环复用本函数的格式校验与重试逻辑。
+    供评审→修正循环复用本函数的格式校验与重试逻辑。
     """
-
-    llm = llm or create_plan_llm()
 
     messages: list[dict[str, str]] = [
         {
@@ -91,9 +89,9 @@ def create_generation_plan(
     for attempt in range(max_retries + 1):
 
         try:
-            content = llm.complete(messages)
+            content = llm.chat(messages)
 
-        except (RuntimeError, OpenAIError) as exc:
+        except RuntimeError as exc:
             # 空内容 / 网络等传输级失败：瞬时故障，直接重试同一次请求，不追加修正
             last_error = exc
 

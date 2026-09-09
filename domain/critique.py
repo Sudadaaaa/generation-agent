@@ -3,11 +3,9 @@
 import json
 from dataclasses import dataclass, field
 
-from openai import OpenAIError
-
-from agent.prompts import CRITIQUE_SYSTEM_PROMPT
-from planning.llm import PlanLLM
-from planning.schema import GenerationPlan
+from domain.prompts import CRITIQUE_SYSTEM_PROMPT
+from domain.schema import GenerationPlan
+from llm.base import ChatClient
 
 
 @dataclass
@@ -21,7 +19,7 @@ class CritiqueVerdict:
 def critique_plan(
     user_input: str,
     plan: GenerationPlan,
-    llm: PlanLLM,
+    llm: ChatClient,
     user_additions: list[str] | None = None,
 ) -> CritiqueVerdict:
     """让评审模型对照需求评审计划。
@@ -63,8 +61,8 @@ def critique_plan(
     ]
 
     try:
-        content = llm.complete(messages)
-    except (RuntimeError, OpenAIError) as exc:
+        content = llm.chat(messages)
+    except RuntimeError as exc:
         print(f"[agent] 评审调用失败，按通过处理：{exc}")
         return CritiqueVerdict(ok=True)
 

@@ -5,21 +5,19 @@
 自由组织措辞，输出可直接投喂生图模型的文本。
 """
 
-from openai import OpenAIError
-
-from planning.llm import PlanLLM
-from planning.prompts import RENDER_SYSTEM_PROMPT
-from planning.schema import GenerationPlan
+from domain.prompts import RENDER_SYSTEM_PROMPT
+from domain.schema import GenerationPlan
+from llm.base import ChatClient
 
 
 def build_final_prompt(
     plan: GenerationPlan,
-    llm: PlanLLM,
+    llm: ChatClient,
     user_input: str | None = None,
 ) -> str:
     """把 GenerationPlan 渲染成最终生图提示词。
 
-    llm 渲染需要自由文本输出（调用 complete(json_mode=False)）；
+    llm 渲染需要自由文本输出（调用 chat(json_mode=False)）；
     传入原始 user_input 可帮助模型把握语言与措辞。
     渲染失败/返回空内容时回退到 plan.to_prompt_text()（确定性兜底），
     打印 [render] 警告，不阻塞出图。
@@ -38,8 +36,8 @@ def build_final_prompt(
     ]
 
     try:
-        text = llm.complete(messages, json_mode=False)
-    except (RuntimeError, OpenAIError) as exc:
+        text = llm.chat(messages, json_mode=False)
+    except RuntimeError as exc:
         print(f"[render] LLM 渲染失败，回退到确定性拼接：{exc}")
         return plan.to_prompt_text()
 
