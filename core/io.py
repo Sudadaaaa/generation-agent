@@ -17,8 +17,8 @@ class IO(ABC):
         """向用户提一个问题/给一个输入提示，返回其原样输入（不含提示前缀）。"""
 
     @abstractmethod
-    def out(self, text: str = "") -> None:
-        """向用户输出一行文本。"""
+    def out(self, text: str = "", end: str = "\n") -> None:
+        """输出文本。end 默认换行；流式输出传 end=""。"""
 
 
 class ConsoleIO(IO):
@@ -27,5 +27,5 @@ class ConsoleIO(IO):
     def ask(self, prompt: str) -> str:
         return input(prompt)
 
-    def out(self, text: str = "") -> None:
-        print(text)
+    def out(self, text: str = "", end: str = "\n") -> None:
+        print(text, end=end, flush=True)

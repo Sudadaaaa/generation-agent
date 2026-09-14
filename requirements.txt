@@ -1,11 +1,8 @@
 # Runtime dependencies
-python-dotenv
-openai
+python-dotenv        # pydantic-settings 读 env_file 依赖它
 pydantic>=2
+pydantic-settings>=2
+openai
 torch
 diffusers
 Pillow
-
-# Optional — only needed for --llm local (LocalQwen3PlanLLM)
-# transformers
-# peft   # only if you also use LoRA adapter (--lora-path)

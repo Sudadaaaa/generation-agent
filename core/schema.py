@@ -114,8 +114,8 @@ class GenerationPlan(BaseModel):
 
     把画面拆解为多个基本元素，每个元素是一次出现，用一套通用字段
     （identity/appearance/layout/action）描述；overall 用一段字符串描述
-    画面级（全局）属性。最终提示词由 domain.rendering 交给 LLM 渲染，
-    to_prompt_text 仅在 LLM 失败时作确定性兜底。
+    画面级（全局）属性。这份结构不直接出图——它要先被渲染成一段自然的
+    最终提示词（由 LLM 完成），to_prompt_text 是渲染不出时的确定性兜底。
     """
 
     elements: list[Element] = Field(
@@ -147,9 +147,9 @@ class GenerationPlan(BaseModel):
     def to_prompt_text(self) -> str:
         """把结构化计划拼成一段提示词文本（确定性兜底）。
 
-        仅供 LLM 渲染失败时兜底；正常路径用 domain.rendering.build_final_prompt，
-        由大模型生成更自然的最终提示词。每元素按 布局→称呼→外表→动作 拼接，
-        overall 附在末尾；不输出字段名、编号等结构标记。
+        兜底路径：正常路径是由大模型渲染出更自然的最终提示词，这里只在那个
+        渲染失败时用。每元素按 布局→称呼→外表→动作 拼接，overall 附在末尾；
+        不输出字段名、编号等结构标记。
         """
 
         segments: list[str] = [el.to_prompt_text() for el in self.elements]
