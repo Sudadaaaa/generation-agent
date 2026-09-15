@@ -9,6 +9,10 @@
   PLAN_MODEL_ID       plan 子 agent 的模型 id；**留空 = 沿用 LLM_MODEL_ID**
   PLAN_API_KEY        plan 子 agent 的密钥；**留空 = 沿用 LLM_API_KEY**
   PLAN_BASE_URL       plan 子 agent 的服务地址；**留空 = 沿用 LLM_BASE_URL**
+  PLAN_PROVIDER       plan 子 agent 的服务商标识；**留空 = deepseek**。
+                      纯显示用（core/agent.py 的 __str__），不参与任何分支判断——
+                      「按 schema 约束输出」用的是同一个 response_format，
+                      在 DeepSeek 与 vLLM 上写法一致，不需要按 provider 翻译
   T2I_MODEL_ID        生图后端，取 tools/t2i.py 里 MODELS 的键
                       （Z-Image-Turbo / FLUX.2-klein-9B）；**留空 = 无生图能力**，
                       注册的工具集里就没有 generate_image（干跑 / 只出提示词的验证方式）
@@ -17,9 +21,9 @@
 
 优先级（pydantic-settings 处理）：构造参数 > 环境变量 > .env > 字段缺省。
 
-不进环境变量的：步数 / guidance_scale / 分辨率 / 种子 / temperature / 最大重试次数——
-那些是「模型怎么跑」的配方，属于代码，在 tools/t2i.py 的 _ModelSpec 与
-agent/planagent.py 的 PlanAgent 里。
+不进环境变量的：步数 / guidance_scale / 分辨率 / 种子 / 最大重试次数——那些是
+「模型怎么跑」的配方，属于代码，在 tools/t2i.py 的 _ModelSpec 与
+agent/planagent.py 的 PlanAgent / RESPONSE_FORMAT 里。
 """
 
 from __future__ import annotations
@@ -58,6 +62,7 @@ class AgentConfig(BaseSettings):
     plan_model_id: str = ""
     plan_api_key: str = Field(default="", repr=False)     # ← 与 llm_api_key 同理：防密钥进日志
     plan_base_url: str = ""
+    plan_provider: str = ""                               # ← 纯显示用，见模块 docstring
 
     # ── 生图（工具集装配）：与 LLM_* 同一条规则，字段名大写即键名 ──
     t2i_model_id: str = ""
@@ -75,6 +80,7 @@ class AgentConfig(BaseSettings):
             "model": self.plan_model_id.strip() or self.llm_model_id,
             "api_key": self.plan_api_key.strip() or self.llm_api_key,
             "base_url": self.plan_base_url.strip() or self.llm_base_url,
+            "provider": self.plan_provider.strip() or "deepseek",
         }
 
     @property
