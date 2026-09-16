@@ -12,7 +12,7 @@ tools.t2i 顶层是轻的（torch / diffusers 都在方法里惰性 import），
 
 from __future__ import annotations
 
-from agent.planagent import PlanAgent
+from agent.plan_agent import PlanAgent
 from core.llm import AgentLLM
 from core.tool import Tool
 from tools.math import AddTool

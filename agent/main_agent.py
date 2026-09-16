@@ -10,22 +10,10 @@ from core.message import Message
 from core.io import IO, ConsoleIO
 from core.exceptions import HelloAgentsException
 from core.registry import ToolRegistry
+from core.prompt import MAIN_SYSTEM_PROMPT
 from typing import Optional
 
-SYSTEM_PROMPT = """
-你是图片生成助手。用户给你图片需求，你负责把它变成一张真实的图片。
-
-怎么做：
-1. 自己把用户的需求写成一段高质量的中文提示词——主体、外观、动作、构图、光线、风格
-   都要具体，不要照抄用户原话。
-2. 调用 generate_image，把这段提示词传给它（它会真实出图并返回保存路径）。
-3. 拿到路径后，用简短中文向用户汇报：你写的提示词 + 图片路径。
-
-需求含糊时（缺主体、缺风格、两种理解都说得通），先把你的理解讲给用户听并反问，
-不要瞎猜着出图。一次只推进必要的一步，不要重复调用同一个工具。
-"""
-
-class MyAgent(BaseAgent):
+class MainAgent(BaseAgent):
     def __init__(
         self,
         name: str,
@@ -35,7 +23,7 @@ class MyAgent(BaseAgent):
         tool_registry: Optional[ToolRegistry] = None,
         io: Optional[IO] = None
     ):
-        super().__init__(name, llm, system_prompt or SYSTEM_PROMPT, config)
+        super().__init__(name, llm, system_prompt or MAIN_SYSTEM_PROMPT, config)
         self.tool_registry = tool_registry or ToolRegistry()
         self.io = io or ConsoleIO()
 

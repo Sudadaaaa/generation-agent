@@ -1,0 +1,24 @@
+compute_environment: LOCAL_MACHINE
+distributed_type: DEEPSPEED
+
+deepspeed_config:
+  zero_stage: 3
+  zero3_init_flag: true
+  zero3_save_16bit_model: true
+
+  # auto = 由代码单一来源推导：微批取 DataLoader 的 batch_size(=args.batch_size)
+  train_micro_batch_size_per_gpu: auto
+  # ⚠️ gradient_accumulation_steps 不能写在这（也不写 auto）：
+  #   accelerate 1.13 的 Accelerator.__init__ 会对环境变量做 int()，auto 会崩
+  #   (ValueError: invalid literal for int() with base 10: 'auto')。
+  #   不写 → DS launcher 不注入该环境变量 → Accelerator 直接采用代码
+  #   Accelerator(gradient_accumulation_steps=args.grad_accum)，DS 引擎 prepare 时自动回填。
+
+  offload_optimizer_device: none
+  # 实验：param 搬到 CPU（ZeRO-3 下 GPU 只留"当前计算层"+激活，砍峰值）
+  offload_param_device: cpu
+
+mixed_precision: bf16
+
+num_processes: 4
+main_process_port: 0

@@ -6,3 +6,12 @@ openai
 torch
 diffusers
 Pillow
+
+# ---- 训练依赖（train/ + mydatasets/）----
+# 与运行时共用同一个 conda 环境（llm）；vLLM 服务是另一个独立环境，见 README。
+# 下面都是实测跑通过的那套版本，不是"大概能装"的版本：
+accelerate==1.13.0
+deepspeed==0.18.9
+peft==0.19.0
+transformers==5.16.1
+datasets==4.8.4

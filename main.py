@@ -5,7 +5,7 @@
 重置对话 = 重跑 main（重跑即全新会话）。
 """
 
-from agent.myagent import MyAgent
+from agent.main_agent import MainAgent
 from core.config import AgentConfig
 from core.io import ConsoleIO
 from core.llm import AgentLLM
@@ -25,7 +25,7 @@ def main() -> None:
     for tool in build_tools(config):
         registry.register(tool)
 
-    agent = MyAgent(
+    agent = MainAgent(
         name="助手",
         llm=AgentLLM(
             model=config.llm_model_id,
