@@ -137,13 +137,17 @@ class ImageGenerator:
 class GenerateImageArgs(BaseModel):
     """generate_image 的参数。"""
 
-    prompt: str = Field(description="要出图的最终提示词（自然语言，中文）")
+    prompt: str = Field(
+        description=(
+            "一段自然、连贯的提示词，把画面讲清楚。"
+        )
+    )
 
 
 @dataclass
 class GenerateImageTool(Tool):
     name: str = "generate_image"
-    description: str = "用一段提示词真实生成一张图片并保存到本地，返回保存路径"
+    description: str = "根据自然语言生成一张图片并保存到本地，返回保存路径"
     args_schema: Args = GenerateImageArgs
 
     # 以下都是可选装配项；全不填 = Z-Image-Turbo / outputs / cuda:0，与 AddTool() 一样裸用可用

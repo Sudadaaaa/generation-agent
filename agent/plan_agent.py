@@ -155,7 +155,7 @@ class PlanAgent(BaseAgent):
 if __name__ == "__main__":
     """本层自测入口：不经过 main.py / PlanTool，直接验 plan agent 的产出与修正循环。
 
-    用 `python -m agent.planagent`（在仓库根跑）或 `python agent/planagent.py`。
+    用 `python -m agent.plan_agent`（在仓库根跑）或 `python agent/plan_agent.py`。
     连说两句「画一只橘猫蹲坐在窗台上，黄昏暖光」→「在刚才基础上加一副墨镜」，
     可验 history 全量保留。
     """

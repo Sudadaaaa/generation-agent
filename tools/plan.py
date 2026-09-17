@@ -28,12 +28,9 @@ class PlanArgs(BaseModel):
 @dataclass
 class PlanTool(Tool):
     name: str = "plan"
-    # 本轮的编排话术暂时挂在这里：MyAgent 仍是「生图助手」，等它改成通用 agent 时，
-    # 下面第 2 段「拿到计划后怎么渲染」应当搬回系统提示词，这里瘦身回纯工具说明。
     description: str = (
-        "一个规划助手，能将生图提示词拆解成结构化的生成计划（GenerationPlan JSON），返回JSON 文本。"
-        "这个助手只会保证交一份符合规则的计划，但自身不知道这个计划好不好"
-        "助手记得自己做过什么，也能根据要求修正返回的生成的计划"
+        "一个计划助手，把一段画面需求拆解成详细的生成计划，可以提高生成的效果。"
+        "它负责将需求拆解为生成计划，计划可能存在问题，因此可以接收修改意见二次优化生成计划。"
     )
     args_schema: Args = PlanArgs
 

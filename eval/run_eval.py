@@ -41,7 +41,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent.planagent import PlanAgent, RESPONSE_FORMAT, parse_generation_plan
+from agent.plan_agent import PlanAgent, RESPONSE_FORMAT, parse_generation_plan
 from core.config import AgentConfig
 from core.llm import AgentLLM
 from core.prompt import build_plan_system_prompt

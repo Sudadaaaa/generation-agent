@@ -13,6 +13,10 @@
                       纯显示用（core/agent.py 的 __str__），不参与任何分支判断——
                       「按 schema 约束输出」用的是同一个 response_format，
                       在 DeepSeek 与 vLLM 上写法一致，不需要按 provider 翻译
+  CRITIC_MODEL_ID     critic 子 agent 的模型 id；**留空 = 沿用 LLM_MODEL_ID**
+  CRITIC_API_KEY      critic 子 agent 的密钥；**留空 = 沿用 LLM_API_KEY**
+  CRITIC_BASE_URL     critic 子 agent 的服务地址；**留空 = 沿用 LLM_BASE_URL**
+  CRITIC_PROVIDER     critic 子 agent 的服务商标识；**留空 = deepseek**
   T2I_MODEL_ID        生图后端，取 tools/t2i.py 里 MODELS 的键
                       （Z-Image-Turbo / FLUX.2-klein-9B）；**留空 = 无生图能力**，
                       注册的工具集里就没有 generate_image（干跑 / 只出提示词的验证方式）
@@ -23,7 +27,7 @@
 
 不进环境变量的：步数 / guidance_scale / 分辨率 / 种子 / 最大重试次数——那些是
 「模型怎么跑」的配方，属于代码，在 tools/t2i.py 的 _ModelSpec 与
-agent/planagent.py 的 PlanAgent / RESPONSE_FORMAT 里。
+agent/plan_agent.py 的 PlanAgent / RESPONSE_FORMAT 里。
 """
 
 from __future__ import annotations
@@ -64,6 +68,12 @@ class AgentConfig(BaseSettings):
     plan_base_url: str = ""
     plan_provider: str = ""                               # ← 纯显示用，见模块 docstring
 
+    # ── critic 子 agent 的 LLM：与 PLAN_* 同一条规则（留空 = 沿用 LLM_*）──
+    critic_model_id: str = ""
+    critic_api_key: str = Field(default="", repr=False)   # ← 与 llm_api_key 同理：防密钥进日志
+    critic_base_url: str = ""
+    critic_provider: str = ""                             # ← 纯显示用，见模块 docstring
+
     # ── 生图（工具集装配）：与 LLM_* 同一条规则，字段名大写即键名 ──
     t2i_model_id: str = ""
     t2i_model_device: str = "cuda:0"
@@ -81,6 +91,23 @@ class AgentConfig(BaseSettings):
             "api_key": self.plan_api_key.strip() or self.llm_api_key,
             "base_url": self.plan_base_url.strip() or self.llm_base_url,
             "provider": self.plan_provider.strip() or "deepseek",
+        }
+
+    @property
+    def critic_llm_kwargs(self) -> dict[str, str]:
+        """CriticAgent 用的 AgentLLM 构造参数（键名与 AgentLLM.__init__ 一一对应）。
+
+        与 plan_llm_kwargs 同一条回退规则：CRITIC_* 留空就沿用 LLM_*，零配置即可用。
+
+        默认落在主模型上是有意的：计划由 plan 子 agent 出，让主模型（通常更强）来评——
+        评审得比被评的模型强才有意义，判一个比自己弱的产出也不存在自偏好问题。
+        （若把 PLAN_* 也配成同一个模型，critic 就在评自己家的东西了，那时才需要另配。）
+        """
+        return {
+            "model": self.critic_model_id.strip() or self.llm_model_id,
+            "api_key": self.critic_api_key.strip() or self.llm_api_key,
+            "base_url": self.critic_base_url.strip() or self.llm_base_url,
+            "provider": self.critic_provider.strip() or "deepseek",
         }
 
     @property
