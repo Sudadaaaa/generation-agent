@@ -117,14 +117,15 @@ class MainAgent(BaseAgent):
 
 
 if __name__ == "__main__":
-    """本层自测入口：不经过 main.py，直接验 MyAgent 的对话 + 流式重组。
+    """本层自测入口：不经过 main.py，直接验 MainAgent 的对话 + 流式重组。
 
-    用 `python -m agent.myagent`（在仓库根跑）或 `python agent/myagent.py`。
+    用 `python -m agent.main_agent`（在仓库根跑）或 `python agent/main_agent.py`。
+    不传 tool_registry，跑的是一个空注册表——这里只验对话与流式重组，不掺工具。
     """
     from core.config import AgentConfig
 
     cfg = AgentConfig()
-    agent = MyAgent(
+    agent = MainAgent(
         name="基础助手",
         llm=AgentLLM(
             model=cfg.llm_model_id,

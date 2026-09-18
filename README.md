@@ -15,7 +15,7 @@ generate_image（本地生图模型出图，PNG 落盘 outputs/）
 汇报：提示词 + 图片路径
 ```
 
-整场对话一份 history（在 `MyAgent` 里），user / assistant / tool 消息按序追加。
+整场对话一份 history（在 `MainAgent` 里），user / assistant / tool 消息按序追加。
 「在刚才基础上加 XX 再生成」可直接续作；重置对话 = 重跑 main。
 `PlanAgent` 也有自己的一份全量 history，所以它对「在刚才基础上加 XX」同样接得住。
 
@@ -159,11 +159,11 @@ DNS 正常），缓存缺东西时它会立刻报错，而不是挂着等一轮�
 
 各层还能脱离 `main.py` 单独自测（入口在各文件末尾的 `if __name__ == "__main__"`）：
 
-    python core/llm.py        # 只验传输层 + 原生 function calling，不经过 MyAgent
-    python agent/myagent.py   # 只验 MyAgent 的对话 + 流式重组
-    python agent/planagent.py # 只验 plan 的产出与格式修正循环，不经过任何工具
+    python core/llm.py         # 只验传输层 + 原生 function calling，不经过 MainAgent
+    python agent/main_agent.py # 只验 MainAgent 的对话 + 流式重组
+    python agent/planagent.py  # 只验 plan 的产出与格式修正循环，不经过任何工具
 
-都能用 `python -m core.llm` / `python -m agent.myagent` / `python -m agent.planagent`
+都能用 `python -m core.llm` / `python -m agent.main_agent` / `python -m agent.planagent`
 （在仓库根跑）替代。
 
 想真出图：`.env` 里给 `T2I_MODEL_ID` 配 `Z-Image-Turbo` 或 `FLUX.2-klein-9B`。
@@ -183,7 +183,7 @@ core/       与图像无关的通用机制
   registry.py  ToolRegistry（注册 / 执行 / 导出 OpenAI schema）
   exceptions.py
 agent/      子 agent
-  myagent.py   MyAgent：run() 工具循环 + 流式重组（大脑）
+  main_agent.py MainAgent：run() 工具循环 + 流式重组（大脑）
   planagent.py PlanAgent：需求 → GenerationPlan，带格式修正循环
 tools/      工具
   math.py      add（示例工具）

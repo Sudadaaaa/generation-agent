@@ -57,7 +57,7 @@ class AgentLLM:
 
 
 if __name__ == "__main__":
-    """本层自测入口：不经过 MyAgent，直接验传输层 + 原生 function calling。
+    """本层自测入口：不经过 MainAgent，直接验传输层 + 原生 function calling。
 
     用 `python -m core.llm`（在仓库根跑）或 `python core/llm.py`。
     """
@@ -68,7 +68,7 @@ if __name__ == "__main__":
 
     io = ConsoleIO()
     io.out("=" * 60)
-    io.out("开始测试（核心层：LLM 传输 + 工具调用，不经过 MyAgent）")
+    io.out("开始测试（核心层：LLM 传输 + 工具调用，不经过 MainAgent）")
     io.out("=" * 60)
 
     cfg = AgentConfig()
