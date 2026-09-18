@@ -1,79 +1,10 @@
-"""全项目提示词的唯一真源。
-
-## 为什么必须集中在这里
-
-plan 任务的 system 提示词有两个消费方，分属两层：
-
-  - 推理侧: agent/plan_agent.py  → PlanAgent 每次请求带上的 system 消息
-  - 训练侧: mydatasets/plan_sft.py → 织进 SFT 语料的那条 system 消息
-
-两边必须逐字相同，否则模型学到的和线上看到的是两套东西（train/serve 偏斜）。
-从前两边各存一份：推理侧现拼，训练侧冻结成一个字符串字面量，靠注释提醒同步。
-
-**这个做法已经失效过一次**：core/schema.py 里 GenerationPlan 的类 docstring 被改过
-措辞，而 pydantic 会把它嵌成 schema 顶层的 description，于是训练语料用的提示词
-（sha1 510f9d91）与推理用的（3b8c905a）从此不一致——没有任何机制会报错，
-是后来比对哈希才发现的。
-
-现在两边都 import 本模块，副本在物理上不存在了。
-
-## 只放文本，不放逻辑
-
-本模块只依赖 core.schema（拼提示词要用 pydantic 生成的 JSON Schema）。
-**刻意不 import core.llm / core.config / core.agent**：训练侧的
-mydatasets/plan_sft.py 也要 import 这里，不能让一个数据加载器被拖进
-openai 客户端、环境变量读取那一整套 agent 依赖。
-
-## 散文与 schema 的分工（改提示词前必读）
-
-**业务规则一律写进 core/schema.py 的字段说明，散文里只留角色设定与输出契约。**
-
-规则有两个消费方：plan 子 agent 拼 schema 来生成，critic 子 agent 拼**同一份**
-schema 来评审。规则留在散文里，critic 就得抄一份——两份副本没有任何机制保证同步，
-必然漂，而且漂了不报错。写进 schema 则天然只有一份。
-
-（这条边界改过。早先的写法是「跨字段的规则放散文，字段级的放 description」，
-理由是 schema 只表达字段级语义。实际用下来，跨字段的规则（拆解粒度、随身道具归属）
-写进 `elements` 的 description 里模型同样照做，而散文那份副本反而多出一个漂移点。）
-
-现在留在散文的只有两类——**身份（你是谁、不做什么）**，和**schema 表达不了的
-全局要求**（现在只剩 critic 的语言判断例外）。plan 侧的散文已经一条业务规则都不剩。
-
-**判断标准是「critic 能不能看见」，不只是「schema 装不装得下」**：critic 拿到的
-只有需求 + schema + 待评计划，plan 侧散文它完全看不见。所以一条规则只要 critic
-可能要据以评审（例如信息忠实性），就必须进 schema——留在 plan 散文里等于让 critic
-去判一条它没读过的规则。
-
-**能用类型表达的规则不要用文字表达**：appearance/layout/action/overall 从前是
-`Optional[str] = None`，靠一句「不要留 null」的散文去补。改成必填 `str` 之后，
-这句话连同它防的那个失败模式一起消失了——pydantic 校验和 xgrammar 掩码都在解码期
-就挡住了，比任何措辞都硬。一条规则如果能在 schema 里变成类型约束，就该在那儿。**
 """
-
+全项目提示词的唯一真源。
+"""
 import json
-
 from .schema import GenerationPlan
 
-
-def _for_prompt(node):
-    """把 pydantic 生成的 JSON Schema 收拾成适合塞进提示词的样子：删 `title`。
-
-    `title` 只是字段名的副本（`identity` → `"Identity"`），对模型是纯噪声。
-
-    从前还做两件事——删 `default`、把 `Optional[str]` 的
-    `{"anyOf": [{"type": "string"}, {"type": "null"}]}` 收成 `{"type": ["string", "null"]}`。
-    appearance/layout/action/overall 从 `Optional[str] = None` 改成必填 `str` 之后，
-    pydantic 对必填 str 只吐 `{"type": "string"}`，这两条再也不会触发，已删。
-    真需要时再加：留一条走不到的分支，代价是每个读它的人都得先判断「这条现在到底走不走」。
-
-    只影响拼进提示词的这份文本；`GenerationPlan.model_json_schema()` 本身不动
-    （plan_agent 里走 response_format 的那条升级路径用的仍是原样 schema）。
-    """
-    if isinstance(node, dict):
-        return {k: _for_prompt(v) for k, v in node.items() if k != "title"}
-    if isinstance(node, list):
-        return [_for_prompt(x) for x in node]
-    return node
+BASE_SYSTEM_PROMPT = "你是一个乐于助人的AI助手，请用简洁准确的方式回答用户的问题。"
 
 MAIN_SYSTEM_PROMPT = """
 你是通用助手，手上有一组工具。用户提出需求，你自己判断要不要用工具、用哪些、
@@ -109,42 +40,6 @@ GenerationPlan JSON。
 遵守上面的要求，最终输出一个符合 JSON Schema 的 JSON object。
 """
 
-def build_plan_system_prompt() -> str:
-    """散文规则 + 这份 schema —— plan 子 agent 完整的 system 提示词。
-
-    schema 必须拼进提示词：pydantic 的 Field description 不会自己发给模型，
-    不拼进来，core/schema.py 里那几百字字段说明对模型等于不存在。
-    """
-    return (
-        PLAN_BASE_SYSTEM_PROMPT
-        + "\n\n以下是必须严格遵循的 JSON Schema：\n\n"
-        + json.dumps(_for_prompt(GenerationPlan.model_json_schema()),
-                     ensure_ascii=False, indent=2)
-    )
-
-def build_correction_message(error: Exception) -> str:
-    """把格式错误变成一条要求重发的消息。
-
-    只管格式，不管内容——计划拆得好不好、理解对不对是 review 的事，
-    这里只保证拿到的是一份能解析、合 schema 的 GenerationPlan。
-    """
-    return f"""
-你上一次返回的内容不合法，请修正后重新输出。
-
-错误原因：
-
-{error}
-
-要求：
-- 只改上面错误原因指出的字段，其余内容逐字保持不变。
-- 重新输出【完整】的 JSON object，不要只输出改动的那一小段。
-- 只能返回 JSON，不要输出解释，不要 Markdown 代码围栏。
-"""
-
-# ===== critic 子 agent 的角色设定 =====
-# rubric 先行：检查项不写进散文，而是让 critic 对着 schema 逐条过——它拼的是
-# 与 plan 侧**同一份** schema，所以评的是「计划符不符合这份规则」，而不是模型的
-# 个人品味。换模型、换提供方，结论仍然可比，规则也不会两边漂。
 CRITIC_BASE_SYSTEM_PROMPT = """
 你是一个专业的评审员，对分析用户的需求有着非常强的理解。用户给你一条需求，
 和一份按下方 Schema 拆解成的结构化生成计划，你要指出这份计划的问题并给出修改意见，
@@ -170,15 +65,20 @@ CRITIC_BASE_SYSTEM_PROMPT = """
 }
 """
 
+def build_plan_system_prompt() -> str:
+    """
+    plan 子 agent 的 system 提示词。
+    """
+    return (
+        PLAN_BASE_SYSTEM_PROMPT
+        + "\n\n以下是必须严格遵循的 JSON Schema：\n\n"
+        + json.dumps(_for_prompt(GenerationPlan.model_json_schema()),
+                     ensure_ascii=False, indent=2)
+    )
 
 def build_critic_system_prompt() -> str:
-    """critic 子 agent 的 system 提示词。
-
-    schema 与 plan 侧**拼的是同一份**：critic 判的就是「这份计划符不符合这份 schema」，
-    它得先看见规则本身。散文里因此不复述任何拆解规则——两处各写一遍必然漂，
-    而这个项目已经因为提示词副本漂移吃过一次亏（见模块 docstring）。
-
-    真源仍在这里——critic_agent 只调用本函数、不存副本。
+    """
+    critic 子 agent 的 system 提示词。
     """
     return (
         CRITIC_BASE_SYSTEM_PROMPT
@@ -198,3 +98,32 @@ def build_critique_request(requirement: str, plan: str) -> str:
         "## 用户需求\n\n" + requirement.strip()
         + "\n\n## 待评审的 GenerationPlan\n\n" + plan.strip()
     )
+
+def build_correction_message(error: Exception) -> str:
+    """把格式错误变成一条要求重发的消息。
+
+    只管格式，不管内容——计划拆得好不好、理解对不对是 review 的事，
+    这里只保证拿到的是一份能解析、合 schema 的 GenerationPlan。
+    """
+    return f"""
+你上一次返回的内容不合法，请修正后重新输出。
+
+错误原因：
+
+{error}
+
+要求：
+- 只改上面错误原因指出的字段，其余内容逐字保持不变。
+- 重新输出【完整】的 JSON object，不要只输出改动的那一小段。
+- 只能返回 JSON，不要输出解释，不要 Markdown 代码围栏。
+"""
+
+def _for_prompt(node):
+    """把 pydantic 生成的 JSON Schema 收拾成适合塞进提示词的样子：删 `title`。
+    `title` 只是字段名的副本（`identity` → `"Identity"`），对模型是纯噪声。
+    """
+    if isinstance(node, dict):
+        return {k: _for_prompt(v) for k, v in node.items() if k != "title"}
+    if isinstance(node, list):
+        return [_for_prompt(x) for x in node]
+    return node
