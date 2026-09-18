@@ -40,15 +40,39 @@ def parse_args():
                    help="gradient checkpointing（省显存）")
     return p.parse_args()
 
-def save_lora(accelerator, model, tokenizer, output_dir, e):
+def save_lora(accelerator, model, tokenizer, output_dir, e, n_trainable):
     accelerator.wait_for_everyone()
+    # save_state 是集合操作，每个 rank 都得进，别挪进下面的 is_main_process。
     check_point_path = os.path.join(output_dir, f"checkpoint-{e}")
     os.makedirs(check_point_path, exist_ok=True)
     accelerator.save_state(check_point_path)
+
+    # ④ 取全量参数。⚠️ 这一行**四个 rank 必须一起执行**，不能挪进下面的 is_main_process：
+    # DeepSpeed 的 _zero3_consolidated_16bit_state_dict 内部是 GatheredParameters(
+    # modifier_rank=0) —— 集合通信，全量张量只落在 rank 0、其余 rank 拿到 None
+    # （docstring: "must be called on all ranks and not just rank 0"）。
+    # 只让 rank 0 进，它会卡在这里等一个永远不来的对端。实测踩过：另外三个 rank 训完
+    # 就退出了，rank 0 独自占着 13.4G 显存空转十几分钟、一个字节没写出来。
+    state_dict = accelerator.get_state_dict(model)
+
     if accelerator.is_main_process:
         unwrapped = accelerator.unwrap_model(model)   # ③ 剥掉 DDP 包装层
-        unwrapped.save_pretrained(output_dir)         # ④ 存 LoRA adapter（几十MB）
+        # 为什么非得换这一份：ZeRO-3 下 unwrap 出来只是本卡那一份分片，没被 materialize
+        # 的参数会**以空张量**写进 safetensors——不报错、文件大小也正常，要到起服务加载
+        # 时才炸。（踩过：MLP 的 gate/up/down 各少一侧，43,646,976 个 LoRA 参数只存下
+        # 22,413,312，51.4%，adapter 仍是完整的 87MB。）
+        # get_state_dict 走的就是 accelerator.save_state 落那份 16bit 全量模型用的同一条路；
+        # peft 的 save_pretrained 收到这份 dict 后只挑 "lora_" 键，底模权重不会进 adapter。
+        n_saved = sum(v.numel() for k, v in state_dict.items() if "lora_" in k)
+        if n_saved != n_trainable:
+            # 宁可这轮训练白跑，也别再交出一个"能用但学残了"的 adapter。
+            raise RuntimeError(
+                f"adapter 不完整：gather 到 {n_saved:,} 个 LoRA 参数，训练时是 "
+                f"{n_trainable:,} 个——差的那部分会以空张量写出去。本次保存作废。"
+            )
+        unwrapped.save_pretrained(output_dir, state_dict=state_dict)
         tokenizer.save_pretrained(output_dir)         # ⑤ 存 tokenizer 文件
+        accelerator.print(f"adapter 已存至 {output_dir}（LoRA 参数 {n_saved:,} 个）")
 
         old_checkpoint_path = os.path.join(output_dir, f"checkpoint-{e - 1}")
         if os.path.exists(old_checkpoint_path):
@@ -56,7 +80,6 @@ def save_lora(accelerator, model, tokenizer, output_dir, e):
 
 def main():
     args = parse_args()
-
     # ⚠️ 顺序敏感：ZeRO-3 下必须先创建 Accelerator，它内部会激活 transformers 的
     # HfDeepSpeedConfig(stage3)。之后 from_pretrained 才会被自动包进
     # deepspeed.zero.Init()，让每张卡从"出生"就只持有 1/4 的权重。
@@ -90,6 +113,9 @@ def main():
 
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
+    # 存 adapter 时的核对基准（见 save_lora）。必须在 prepare **之前**取：ZeRO-3 分片
+    # 之后每张卡只看得见自己那一份，这个数就再也算不出来了。
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     dataset = get_dataset(args, tokenizer)
     data_collator = DataCollatorForSeq2Seq(
@@ -153,7 +179,7 @@ def main():
                 if accelerator.is_main_process:
                     bar.set_postfix({'sum_loss':f'{loss:.4f}', 'lr':f'{learn_rate:.8f}'})
 
-        save_lora(accelerator, model, tokenizer, args.output_dir, e)
+        save_lora(accelerator, model, tokenizer, args.output_dir, e, n_trainable)
         e += 1
     return
 
